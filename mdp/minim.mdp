@@ -1,0 +1,14 @@
+integrator = steep
+emtol = 1000.0  ; Увеличено для NaN-fix
+emstep = 0.01
+nsteps = 100000  ; Больше шагов
+nstlist = 20
+cutoff-scheme = Verlet
+ns_type = grid
+rlist = 1.1
+coulombtype = Reaction-field
+rcoulomb = 1.1
+epsilon_rf = 15
+vdw_type = Cut-off
+rvdw = 1.1
+

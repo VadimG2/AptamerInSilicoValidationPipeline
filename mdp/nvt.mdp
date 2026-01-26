@@ -1,0 +1,41 @@
+; --- Настройки для NVT уравновешивания (Martini) ---
+integrator     = md
+dt             = 0.02
+nsteps         = 50000        ; 1 нс
+nstxout-compressed = 5000
+nstvout        = 5000
+nstenergy      = 5000
+nstlog         = 5000
+
+; --- Настройки окружения ---
+cutoff-scheme  = Verlet
+nstlist        = 20
+rlist          = 1.1
+
+; --- Электростатика и Ван-дер-Ваальс ---
+coulombtype    = reaction-field
+rcoulomb       = 1.1
+epsilon_r      = 15
+epsilon_rf     = 15
+vdw-type       = cutoff
+vdw-modifier   = none
+rvdw           = 1.1
+
+; --- Термостат (V-rescale для быстрого equilibration) ---
+tcoupl         = v-rescale    ; Добавлено!
+nsttcouple     = 1000
+tc-grps        = Protein RNA W ION
+tau_t          = 1.0 1.0 1.0 1.0
+ref_t          = 300 300 300 300
+
+; --- Баростат - ВЫКЛЮЧЕН ---
+pcoupl         = no
+
+; --- Генерация скоростей ---
+gen_vel        = yes
+gen_temp       = 300
+gen_seed       = -1
+
+; --- Ограничения ---
+constraints    = none
+define         = -DPOSRES     ; Restraints на backbone

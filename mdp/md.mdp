@@ -1,0 +1,46 @@
+; --- Production (Martini) ---
+integrator     = md
+dt             = 0.02
+nsteps         = 500000     ; 10 нс; увеличьте для full run (e.g., 5000000 = 100 нс)
+
+; --- Вывод ---
+nstxout-compressed = 5000    ; Траектория каждые 100 ps
+nstvout        = 0          ; Не сохранять velocities
+nstenergy      = 5000       ; Энергии каждые 100 ps
+nstlog         = 5000       ; Лог каждые 100 ps
+
+; --- Окружение ---
+cutoff-scheme  = Verlet
+nstlist        = 20
+rlist          = 1.2        ; Увеличено для буфера (стабильность Verlet)
+
+; --- Электростатика и VdW ---
+coulombtype    = reaction-field
+rcoulomb       = 1.1
+epsilon_r      = 15
+epsilon_rf     = 15         ; Finite (как в NVT/NPT, избегать Inf drift)
+vdw-type       = cutoff
+vdw-modifier   = none       ; Без shift (мягче, стабильность)
+rvdw           = 1.1
+
+; --- Термостат (Nose-Hoover) ---
+tcoupl         = nose-hoover
+nsttcouple     = 1000
+tc-grps        = Protein RNA W ION
+tau_t          = 1.0 1.0 1.0 1.0
+ref_t          = 300 300 300 300
+
+; --- Баростат (Parrinello-Rahman) ---
+pcoupl         = Parrinello-Rahman
+pcoupltype     = isotropic
+nstpcouple     = 10
+tau_p          = 12.0
+ref_p          = 1.0
+compressibility = 4.5e-5    ; Стандарт для Martini water (isotropic)
+
+; --- Генерация скоростей ---
+gen_vel        = no         ; Continue from NPT
+
+; --- Ограничения ---
+constraints    = none       ; Полная свобода (CG без H)
+; Нет COM removal — трансляции/ротации свободны по умолчанию

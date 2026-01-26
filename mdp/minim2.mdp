@@ -1,0 +1,16 @@
+integrator = steep
+emtol = 50.0
+emstep = 0.005  ; Меньше шаг для точности
+nsteps = 50000
+nstlist = 20
+cutoff-scheme = Verlet
+ns_type = grid
+rlist = 1.1
+coulombtype = Reaction-field
+rcoulomb = 1.1
+epsilon_rf = 15  ; Ваш фикс — ок, вместо inf
+vdw_type = Cut-off  ; Без shift — мягче
+rvdw = 1.1
+; Добавьте для LINCS:
+lincs-iter = 2  ; Больше итераций LINCS
+lincs-order = 4

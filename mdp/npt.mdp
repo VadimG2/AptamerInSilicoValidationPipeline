@@ -1,0 +1,45 @@
+; --- Настройки для NPT уравновешивания (Martini) ---
+integrator     = md
+dt             = 0.02
+nsteps         = 50000        ; 1 нс
+
+; --- Вывод ---
+nstxout-compressed = 5000
+nstvout        = 5000
+nstenergy      = 5000
+nstlog         = 5000
+
+; --- Окружение ---
+cutoff-scheme  = Verlet
+nstlist        = 20
+rlist          = 1.2          ; Увеличено для буфера (как в NVT)
+
+; --- Электростатика и VdW ---
+coulombtype    = reaction-field
+rcoulomb       = 1.1
+epsilon_r      = 15
+epsilon_rf     = 15           ; Finite, как в NVT (избежать Inf drift)
+vdw-type       = cutoff
+vdw-modifier   = none         ; Без shift, как в NVT
+rvdw           = 1.1
+
+; --- Термостат (Nose-Hoover) ---
+tcoupl         = nose-hoover
+nsttcouple     = 1000
+tc-grps        = Protein RNA W ION
+tau_t          = 1.0 1.0 1.0 1.0
+ref_t          = 300 300 300 300
+
+; --- Баростат ---
+pcoupl         = Parrinello-Rahman
+pcoupltype     = isotropic
+nstpcouple     = 10
+tau_p          = 12.0
+ref_p          = 1.0
+compressibility = 4.5e-5      ; Стандарт для Martini water (isotropic)
+
+; --- Генерация скоростей - ВЫКЛЮЧЕНА ---
+gen_vel        = no
+
+; --- Ограничения ---
+constraints    = none
