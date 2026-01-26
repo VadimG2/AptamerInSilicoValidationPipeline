@@ -6,25 +6,19 @@ import subprocess
 from pathlib import Path
 import re
 
-# =============================================================================
-# ФИКС ДЕТЕРМИНИЗМА — ОДИНАКОВЫЙ РЕЗУЛЬТАТ КАЖДЫЙ РАЗ
-# =============================================================================
 random.seed(42)
 np.random.seed(42)
 os.environ['PYTHONHASHSEED'] = '42'
 
-print("=== ФИКС СИД: Детерминизм включён. Размер test_rna будет ВСЕГДА одинаковым ===")
-
-# Загрузка df (если не загружено)
+# Загрузка df
 if 'df' not in locals():
     df = pd.read_csv('Aptamers_and_targets.csv')
     print("df загружен из CSV.")
 
 df.info()
 
-# =============================================================================
-# ШАГ 1: ПРЕДОБРАБОТКА
-# =============================================================================
+
+# Шаг 1: Предобработка
 print("1. Предобработка данных...")
 
 core_cols = ['apt_seq', 'target_seq']
@@ -37,9 +31,7 @@ positive_df['label'] = 1
 print(f"Осталось {len(positive_df)} уникальных положительных пар после очистки.")
 print("-" * 50)
 
-# =============================================================================
-# ШАГ 2: НЕГАТИВНАЯ ВЫБОРКА С ПРОГРЕССОМ
-# =============================================================================
+# Шаг 2: Негативная выборка с прогрессом
 print("2. Создание негативной выборки...")
 
 unique_apts = positive_df['apt_seq'].unique().tolist()
@@ -74,9 +66,7 @@ combined_df = combined_df.sample(frac=1, random_state=42).reset_index(drop=True)
 print(f"Итоговый размер датасета: {len(combined_df)} (Положительные: {len(positive_df)}, Отрицательные: {len(negative_df)})")
 print("-" * 50)
 
-# =============================================================================
-# ШАГ 3: РНК/ДНК
-# =============================================================================
+# Шаг 3: РНК/ДНК
 print("3. Разделение на РНК и ДНК датасеты...")
 
 df_rna = combined_df[combined_df['apt_seq'].str.contains('U')].copy()
@@ -86,9 +76,7 @@ print(f"Найдено {len(df_rna)} пар с РНК-аптамерами.")
 print(f"Найдено {len(df_dna)} пар с ДНК-аптамерами.")
 print("-" * 50)
 
-# =============================================================================
-# ШАГ 4: CD-HIT С ПРОГРЕССОМ (ФИКС ДЛЯ SNAKEMAKE)
-# =============================================================================
+# Шаг 4: CD-HIT
 print("4. Разделение на Train/Test с помощью кластеризации (CD-HIT)...")
 
 CDHIT_PATH = "./cdhit/cd-hit"  
@@ -110,7 +98,6 @@ def run_cd_hit(sequences: list, output_path: Path, command: str, threshold: floa
     print(f"Запуск команды: {cmd_str}")
     print(f"Прогресс CD-HIT: следите за файлом {output_path}.clstr...")
     try:
-        # ФИКС: shell=True + без pipe — выводит прогресс CD-HIT
         subprocess.run(cmd_str, shell=True, check=True)
         print(f"CD-HIT завершён: {output_path}.clstr создан.")
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -166,9 +153,8 @@ def split_by_clusters(sequences: list, command: str, is_protein: bool, threshold
     
     return train_seqs, test_seqs
 
-# =============================================================================
-# РАЗДЕЛЕНИЕ ДНК
-# =============================================================================
+# Разделение ДНК
+
 if not df_dna.empty:
     print("\n--- Обработка ДНК-датасета ---")
     unique_dna_apts = df_dna['apt_seq'].unique().tolist()
@@ -195,9 +181,7 @@ if not df_dna.empty:
         test_dna_df.to_csv("test_dna_dataset.csv", index=False)
         print("ДНК датасеты сохранены.")
 
-# =============================================================================
-# РАЗДЕЛЕНИЕ РНК
-# =============================================================================
+# Разделение РНК
 if not df_rna.empty:
     print("\n--- Обработка РНК-датасета ---")
     unique_rna_apts = df_rna['apt_seq'].unique().tolist()
