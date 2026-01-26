@@ -1,6 +1,6 @@
 from sklearn.metrics import confusion_matrix
 import numpy as np
-import json # Импортируем библиотеку для работы с JSON
+import json
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
@@ -15,13 +15,13 @@ from apipred_benchmark import run_apipred_benchmark
 from aptatrans_benchmark import run_aptatrans_benchmark
 from aptanet_benchmark import run_aptanet_benchmark
 
-# --- Загрузка данных ---
+# Загрузка данных
 print("Загрузка данных...")
 train_df = pd.read_csv(TRAIN_DATA_PATH)
 test_df = pd.read_csv(TEST_DATA_PATH)
 print(f"Загружено {len(train_df)} обучающих и {len(test_df)} тестовых примеров.")
 
-# --- Запуск бенчмарков ---
+# Запуск бенчмарков
 all_benchmark_results = {}
 
 # 1. Запуск APIPred
@@ -38,7 +38,7 @@ try:
 except Exception as e:
     print(f"\n!!! ОШИКА при выполнении бенчмарка AptaTrans: {e} !!!")
 
-# 3. AptaNet — НОВАЯ СТРОКА
+# 3. AptaNet
 try:
     results_aptanet = run_aptanet_benchmark(train_df, test_df)
     all_benchmark_results['AptaNet'] = results_aptanet
@@ -47,15 +47,9 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-# --- Вывод результатов в ячейку ---
-print("\n\n==================================================")
-print("          ИТОГОВЫЕ РЕЗУЛЬТАТЫ БЕНЧМАРКА          ")
-print("==================================================")
-
-# --- Создание сводной таблицы ---
+# Создание сводной таблицы
 summary_data = []
 for model_name, results in all_benchmark_results.items():
-    # Пропускаем, если для модели не удалось получить результаты
     if not results or not results.get('report'):
         continue
 
@@ -84,13 +78,7 @@ summary_df.set_index('Model', inplace=True)
 print('В AptaNet DNN заменен на XGBoost!')
 print(summary_df.round(4))
 
-
-# --- ИЗМЕНЕНИЕ: Сохранение результатов в файлы ---
-print("\n\n==================================================")
-print("          СОХРАНЕНИЕ РЕЗУЛЬТАТОВ          ")
-print("==================================================")
-
-# 1. Сохранение в текстовый файл (для удобного чтения человеком)
+# 1. Сохранение в текстовый файл
 summary_txt_path = 'benchmark_summary.txt'
 print(f"Сохранение текстового отчета в: {summary_txt_path}")
 with open(summary_txt_path, 'w') as f:
@@ -114,17 +102,16 @@ with open(summary_txt_path, 'w') as f:
         f.write(np.array2string(cm))
         f.write("\n--------------------\n\n")
 
-# 2. Сохранение в JSON файл (для удобной обработки компьютером)
+# 2. Сохранение в JSON файл
 summary_json_path = 'benchmark_summary.json'
 results_for_json = {}
 for model_name, results in all_benchmark_results.items():
-    # Создаем "чистую" версию результатов без огромных массивов
     if results and results.get('report'):
         cm = confusion_matrix(results['true_labels'], results['predictions'])
         results_for_json[model_name] = {
             'accuracy': results['accuracy'],
             'classification_report': results['report'],
-            'confusion_matrix': cm.tolist() # Конвертируем NumPy массив в обычный список
+            'confusion_matrix': cm.tolist()
         }
 
 print(f"Сохранение JSON отчета в: {summary_json_path}")
@@ -134,13 +121,9 @@ with open(summary_json_path, 'w') as f:
 print("\nВсе результаты успешно сохранены.")
 
 
-# БЛОК 5 (v3): ПОДГОТОВКА КОНСЕНСУСНЫХ КАНДИДАТОВ ПО ТРЁМ МОДЕЛЯМ
-# ==============================================================================
-print("\n\n==================================================")
-print("     ПОДГОТОВКА КОНСЕНСУСНЫХ КАНДИДАТОВ (3 МОДЕЛИ)      ")
-print("==================================================")
+# Блок 5: Подготовка консенсусных кандидатов по трем моделям
 
-# --- Проверка наличия исходного DataFrame ---
+# Проверка наличия исходного DataFrame
 if 'df' not in locals():
     print("Загрузка исходного полного DataFrame 'Aptamers_and_targets.csv'...")
     df = pd.read_csv('Aptamers_and_targets.csv')
@@ -148,7 +131,7 @@ if 'df' not in locals():
 else:
     print(f"Исходный DataFrame 'df' уже загружен ({len(df)} уникальных пар).")
 
-# --- Проверка результатов бенчмарков ---
+# Проверка результатов
 required_results = ['APIPred', 'AptaTrans', 'AptaNet']
 missing = [name for name in required_results if name not in all_benchmark_results]
 if missing:
@@ -157,20 +140,20 @@ if missing:
 else:
     print(f"Все три модели найдены: {', '.join(required_results)}")
 
-    # --- Шаг 1: Подготовка test_df с target_name ---
+    # Шаг 1: Подготовка test_df с target_name
     enriched_test_df = pd.merge(test_df, df, on=['apt_seq', 'target_seq'], how='left')
     if 'target_name' not in enriched_test_df.columns:
         print("Критическая ошибка: не удалось добавить target_name.")
     else:
         print(f"Обогащённый test_df: {len(enriched_test_df)} строк.")
 
-    # --- Шаг 2: Создание DataFrame'ов с предсказаниями ---
+    # Шаг 2: Создание DataFrame'ов с предсказаниями
     dfs = {}
 
     for model_name in required_results:
         results = all_benchmark_results[model_name]
         pred_key = 'predictions'
-        proba_key = 'probabilities'  # ← УНИФИЦИРОВАНО!
+        proba_key = 'probabilities'
 
         if pred_key not in results or len(results[pred_key]) != len(enriched_test_df):
             print(f"ОШИБКА: Несоответствие длины предсказаний {model_name}: {len(results[pred_key])} vs {len(enriched_test_df)}")
@@ -192,7 +175,7 @@ else:
         dfs[model_name] = df_pos
         print(f"{model_name}: {len(df_pos)} положительных предсказаний.")
 
-    # --- Шаг 3: Консенсус ---
+    # Шаг 3: Консенсус
     if len(dfs) != 3:
         print("Недостаточно моделей для консенсуса.")
     else:
@@ -203,8 +186,6 @@ else:
                 on=['apt_seq', 'target_seq', 'target_name'],
                 how='inner'
             )
-
-        # Добавляем true_label из test_df (столбец называется 'label')
         consensus = pd.merge(
             consensus,
             enriched_test_df[['apt_seq', 'target_seq', 'label']],
@@ -216,7 +197,7 @@ else:
         print(f"\nКонсенсус по ТРЁМ моделям: {len(consensus)} кандидатов.")
 
         if not consensus.empty:
-            # --- Шаг 4: Подготовка файлов ---
+            # Шаг 4: Подготовка файлов
             docking_dir = Path("./docking_candidates")
             docking_dir.mkdir(exist_ok=True)
             print(f"\nДиректория для докинга: {docking_dir}")
