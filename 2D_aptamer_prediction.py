@@ -1,21 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-2D_aptamer_prediction.py
-Блок 3: Предсказание вторичной структуры аптамеров с помощью RNAfold (ViennaRNA).
-"""
-
 import subprocess
 from pathlib import Path
-from tqdm import tqdm  # ← Обычный tqdm, не notebook
+from tqdm import tqdm
 import pandas as pd
 
-# === ПУТИ ===
 docking_dir = Path("./docking_candidates")
 candidates_csv_path = docking_dir / "candidates_for_docking.csv"
 
-# === ПРОВЕРКА ВХОДНЫХ ДАННЫХ ===
+# Проверка входных данных
 if not candidates_csv_path.exists():
     print(f"[ОШИБКА] Файл {candidates_csv_path} не найден. Запустите блок 1.")
     raise SystemExit(1)
@@ -32,7 +23,6 @@ for _, row in tqdm(candidates_df.iterrows(), total=len(candidates_df), desc="RNA
     aptamer_fasta = candidate_dir / "aptamer.fasta"
     aptamer_ss = candidate_dir / "aptamer.ss"
 
-    # Пропуск, если уже есть
     if aptamer_ss.exists():
         successful_count += 1
         continue
@@ -41,8 +31,6 @@ for _, row in tqdm(candidates_df.iterrows(), total=len(candidates_df), desc="RNA
         print(f"  [Пропуск] {candidate_id}: aptamer.fasta не найден")
         failed_count += 1
         continue
-
-    # Читаем последовательность
     try:
         with open(aptamer_fasta, 'r') as f:
             lines = f.readlines()
@@ -70,7 +58,7 @@ for _, row in tqdm(candidates_df.iterrows(), total=len(candidates_df), desc="RNA
             capture_output=True,
             check=True,
             text=True,
-            timeout=60  # Защита от зависаний
+            timeout=60
         )
 
         with open(aptamer_ss, "w") as f:
@@ -100,7 +88,7 @@ for _, row in tqdm(candidates_df.iterrows(), total=len(candidates_df), desc="RNA
         print(f"  [НЕИЗВЕСТНАЯ ОШИБКА] {candidate_id}: {e}")
         failed_count += 1
 
-# === ИТОГ ===
+# Итог
 print("\n" + "="*60)
 print("ПРЕДСКАЗАНИЕ 2D-СТРУКТУР ЗАВЕРШЕНО")
 print(f"  Успешно: {successful_count}")
@@ -108,7 +96,6 @@ print(f"  Пропущено (уже есть): {len(candidates_df) - successful
 print(f"  Ошибки: {failed_count}")
 print("="*60)
 
-# Маркер для Snakemake
 with open("block3.done", "w") as f:
     f.write("2D structures predicted\n")
 print("block3.done создан — блок 3 завершён.")
