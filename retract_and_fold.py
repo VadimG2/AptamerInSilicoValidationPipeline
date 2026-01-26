@@ -1,15 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-retract_and_fold.py
-Блок 2: Поиск и фолдинг уникальных белковых последовательностей.
-Источники: UniProt + PDB > AlphaFoldDB > ESMFold (NVIDIA API).
-"""
-
 import requests
 from pathlib import Path
-from tqdm import tqdm  # ← Изменено с tqdm.notebook
+from tqdm import tqdm
 import time
 import pandas as pd
 import hashlib
@@ -17,17 +8,17 @@ from typing import Optional, Tuple, List
 import random
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup  # Для парсинга HTML AlphaFoldDB
-import gzip  # Для распаковки .gz файлов
+from bs4 import BeautifulSoup
+import gzip
 
-# Импорты путей из config (для совместимости с Snakemake)
+# Импорты путей из config
 docking_dir = Path("./docking_candidates")
 candidates_csv_path = docking_dir / "candidates_for_docking.csv"
 
 # Конфигурация
 API_KEY_NVIDIA = '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'  # Замените на ваш ключ
 
-# UniProt APIs (ЯВНО HTTPS)
+# UniProt APIs
 UNIPROT_ENTRY_URL = "https://rest.uniprot.org/uniprotkb/{accession}.json"
 PEPTIDE_SEARCH_URL = "https://peptidesearch.uniprot.org/asyncrest/"
 
@@ -41,9 +32,6 @@ HEADERS_NVIDIA = {
     "Accept": "application/json",
 }
 
-# -------------------------------
-# Вспомогательные функции
-# -------------------------------
 def load_sequence_from_fasta(fasta_path: Path) -> str:
     """Загружает последовательность из FASTA файла."""
     with open(fasta_path, 'r') as f:
@@ -124,9 +112,9 @@ def poll_job_status(session: requests.Session, job_url: str, max_wait: int = 120
     print(f"  [PeptideSearch] Общий таймаут ожидания ({max_wait}s).")
     return None
 
-# ==============================================================================
-# 1. ТОЧНЫЙ ПОИСК ПО ПОЛНОЙ СЕКВЕНЦИИ ЧЕРЕЗ PEPTIDE SEARCH
-# ==============================================================================
+
+# 1. Точный поиск по полному сиквенсу через Peptide Search
+
 def search_peptide_exact(sequence: str, max_retries: int = 3) -> Optional[str]:
     """
     Ищет UniProt ID по точному совпадению полной последовательности через Peptide Search.
@@ -141,7 +129,7 @@ def search_peptide_exact(sequence: str, max_retries: int = 3) -> Optional[str]:
         "peps": sequence,
         "taxIds": "",
         "lEQi": "on",
-        "spOnly": "off"  # Включаем TrEMBL + Swiss-Prot
+        "spOnly": "off"
     }
     
     headers = {
@@ -231,9 +219,8 @@ def search_peptide_exact(sequence: str, max_retries: int = 3) -> Optional[str]:
     session.close()
     return None
 
-# ==============================================================================
 # 2. Получение разрешения PDB
-# ==============================================================================
+
 def get_resolution(ref) -> float:
     """Безопасно извлекает разрешение PDB, обрабатывая '-' или не-числа как 99.0."""
     for p in ref.get('properties', []):
@@ -246,9 +233,8 @@ def get_resolution(ref) -> float:
                 return 99.0
     return 99.0
 
-# ==============================================================================
-# 2.5 Скачивание AlphaFoldDB модели (парсинг страницы entry)
-# ==============================================================================
+# 2.5 Скачивание AlphaFoldDB модели
+
 def download_alphafold_model(uniprot_id: str, save_path: Path, session: requests.Session) -> Optional[str]:
     """
     Парсит страницу https://alphafold.ebi.ac.uk/entry/{uniprot_id}
@@ -288,7 +274,7 @@ def download_alphafold_model(uniprot_id: str, save_path: Path, session: requests
         if pdb_url.endswith('.gz'):
             print(f"  [AlphaFoldDB] Распаковка .gz...")
             content = gzip.decompress(content)
-            version = pdb_url.split('model_v')[1].split('.pdb')[0]  # Извлекаем vX
+            version = pdb_url.split('model_v')[1].split('.pdb')[0]
         else:
             version = pdb_url.split('model_v')[1].split('.pdb')[0]
 
@@ -299,7 +285,7 @@ def download_alphafold_model(uniprot_id: str, save_path: Path, session: requests
 
         with open(save_path, 'wb') as f:
             f.write(content)
-        with open(save_path, 'a') as f:  # Добавляем REMARK
+        with open(save_path, 'a') as f:
             f.write(f"\nREMARK   SOURCE: AlphaFoldDB {uniprot_id} (v{version})\n".encode())
 
         print(f"  [AlphaFoldDB] Сохранено: {save_path} (v{version})")
@@ -309,9 +295,9 @@ def download_alphafold_model(uniprot_id: str, save_path: Path, session: requests
         print(f"  [AlphaFoldDB] Ошибка для {uniprot_id}: {e}")
         return None
 
-# ==============================================================================
+
 # 3. Получение структуры (PDB или AlphaFold) по UniProt ID
-# ==============================================================================
+
 def get_structure_from_uniprot(uniprot_id: str, target_seq_len: int, session: requests.Session) -> Optional[Tuple[str, str, str]]:
     """
     Возвращает (struct_id, sequence, source_type)
@@ -341,7 +327,7 @@ def get_structure_from_uniprot(uniprot_id: str, target_seq_len: int, session: re
             print(f"  [PDB] Лучший: {pdb_id} (разрешение: {resolution})")
             return pdb_id, uni_seq, 'pdb'
 
-        # --- 2. Если PDB нет — AlphaFoldDB (парсинг страницы) ---
+        # Если PDB нет — AlphaFoldDB
         print(f"  [AlphaFoldDB] PDB не найден. Проверка страницы entry для {uniprot_id}...")
         return uniprot_id, uni_seq, 'alphafold'
 
@@ -349,9 +335,8 @@ def get_structure_from_uniprot(uniprot_id: str, target_seq_len: int, session: re
         print(f"  [UniProt] Ошибка для {uniprot_id}: {e}")
         return None
 
-# ==============================================================================
 # 4. Скачивание PDB
-# ==============================================================================
+
 def download_pdb(pdb_id: str, save_path: Path, session: requests.Session) -> bool:
     """Скачивает PDB с использованием сессии."""
     url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
@@ -367,9 +352,7 @@ def download_pdb(pdb_id: str, save_path: Path, session: requests.Session) -> boo
         print(f"  [Download] Ошибка для {pdb_id}: {e}")
         return False
 
-# -------------------------------
-# Основной процесс
-# -------------------------------
+
 if not candidates_csv_path.exists():
     print(f"Ошибка: Файл {candidates_csv_path} не найден.")
     raise SystemExit
@@ -416,12 +399,12 @@ for seq_hash, info in tqdm(unique_sequences.items(), desc="Поиск струк
 
     print(f"\n[Поиск] Сиквенс {short_hash} (длина {len(seq)})")
 
-    # === ЭТАП 1: Точный поиск в Peptide Search ===
+    # Этап 1: Точный поиск в Peptide Search
     uniprot_id = search_peptide_exact(seq)
     if uniprot_id:
         unique_sequences[seq_hash]['uniprot_id'] = uniprot_id
 
-        # === ЭТАП 2: Получаем структуру (PDB или AlphaFold) ===
+        # Этап 2: Получаем структуру
         structure_info = get_structure_from_uniprot(uniprot_id, len(seq), global_session)
         if structure_info:
             struct_id, uni_seq, source_type = structure_info
@@ -451,13 +434,13 @@ for seq_hash, info in tqdm(unique_sequences.items(), desc="Поиск струк
                         print("  [AlphaFoldDB] Не удалось скачать модель. Переход к ESMFold.")
 
             if success:
-                continue  # Успешно получили структуру → пропускаем ESMFold
+                continue
         else:
             print("  [UniProt] Не удалось получить структуру. Переход к ESMFold.")
     else:
         print("  [PeptideSearch] Точный матч не найден. Переход к ESMFold.")
 
-    # === ЭТАП 3: ESMFold ===
+    # Этап 3: ESMFold
     print("  [ESMFold] Предсказание...")
     payload = {"sequence": seq}
     try:
@@ -498,9 +481,6 @@ for seq_hash, info in tqdm(unique_sequences.items(), desc="Поиск струк
 
 global_session.close()
 
-# ==============================================================================
-# ИТОГОВАЯ СТАТИСТИКА
-# ==============================================================================
 print("\n" + "="*80)
 print("ИТОГОВАЯ СТАТИСТИКА:")
 stats = pd.Series([info.get('source', 'unknown') for info in unique_sequences.values()]).value_counts()
@@ -514,7 +494,6 @@ print(f"  Всего уникальных:      {len(unique_sequences)}")
 print("="*80)
 print("Поиск 3D-структур завершён.")
 
-# Маркер завершения для Snakemake (блок 2)
 with open("block2.done", "w") as f:
     f.write("Done\n")
 print("block2.done создан — блок 2 завершён.")
