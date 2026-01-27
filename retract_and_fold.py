@@ -16,7 +16,7 @@ docking_dir = Path("./docking_candidates")
 candidates_csv_path = docking_dir / "candidates_for_docking.csv"
 
 # Конфигурация
-API_KEY_NVIDIA = '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'  # Замените на ваш ключ
+API_KEY_NVIDIA = ''  # Замените на ваш ключ
 
 # UniProt APIs
 UNIPROT_ENTRY_URL = "https://rest.uniprot.org/uniprotkb/{accession}.json"
