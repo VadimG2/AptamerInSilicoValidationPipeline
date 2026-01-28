@@ -8,20 +8,20 @@ def main():
         print("Usage: python aggregate_docking_results.py <score_files...> <output_csv>")
         sys.exit(1)
 
-    output_csv = sys.argv[-1]  
+    output_csv = sys.argv[-1]
+
     input_files = sys.argv[1:-1]
-    
+
     results = []
 
     print(f"Aggregating results from {len(input_files)} potential files...")
 
     for file_path in input_files:
         path = Path(file_path)
-        
-        # Обрабатываем только файлы .score.txt
+
         if not path.name.endswith(".score.txt"):
             continue
-            
+
         if not path.exists() or path.stat().st_size == 0:
             continue
 
@@ -30,11 +30,11 @@ def main():
                 content = f.read().strip()
                 if not content:
                     continue
-                
+
                 score = float(content)
                 model_name = path.name.replace(".score.txt", "")
                 candidate_name = path.parent.name
-                
+
                 results.append({
                     "candidate": candidate_name,
                     "model": model_name,
@@ -48,7 +48,7 @@ def main():
     results.sort(key=lambda x: x["docking_score"])
 
     print(f"Writing {len(results)} valid results to {output_csv}")
-    
+
     with open(output_csv, 'w', newline='') as csvfile:
         fieldnames = ['candidate', 'model', 'docking_score']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
