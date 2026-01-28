@@ -5,7 +5,6 @@ import sys
 import shutil
 import tempfile
 
-# Функция валидации
 def is_pdb_valid(filepath):
     if not filepath.exists() or filepath.stat().st_size == 0:
         return False
@@ -15,7 +14,6 @@ def is_pdb_valid(filepath):
                 return True
     return False
 
-# Аргументы
 input_receptor = Path(sys.argv[1]).resolve()
 input_ligand = Path(sys.argv[2]).resolve()
 output_score_file = Path(sys.argv[3]).resolve()
@@ -26,17 +24,12 @@ nmax_config = int(sys.argv[7])
 candidate_id = sys.argv[8]
 model_name = sys.argv[9]
 
-# Создаем выходную директорию
 output_score_file.parent.mkdir(parents=True, exist_ok=True)
-
-
-# Окружение HDOCK
 current_env = os.environ.copy()
 
-# Путь к скомпилированной библиотеке (надо переписать на относительный)
 custom_fftw_path = Path("/mnt/tank/scratch/vgvozdev/apta/resources/fftw/lib")
 
-# Добавляем в LD_LIBRARY_PATH
+
 current_env["LD_LIBRARY_PATH"] = f"{custom_fftw_path}:{current_env.get('LD_LIBRARY_PATH', '')}"
 
 try:
@@ -46,7 +39,6 @@ try:
 
         local_hdock_out = work_dir / "hdock.out"
 
-        # 1. Проверка входных данных
         if not is_pdb_valid(input_receptor):
             print(f"Error: Invalid receptor: {input_receptor}", file=sys.stderr)
             sys.exit(1)
@@ -55,31 +47,28 @@ try:
             output_score_file.touch(); output_complex_pdb.touch()
             sys.exit(0)
 
-        # 2. Подготовка PDB
         pdb4amber = shutil.which("pdb4amber")
         if not pdb4amber:
             print("Error: pdb4amber not found", file=sys.stderr); sys.exit(1)
 
         try:
-            subprocess.run([pdb4amber, "-i", str(input_receptor), "-o", "receptor_clean.pdb"], 
+            subprocess.run([pdb4amber, "-i", str(input_receptor), "-o", "receptor_clean.pdb"],
                            cwd=work_dir, capture_output=True, check=True, env=current_env)
-            subprocess.run([pdb4amber, "-i", str(input_ligand), "-o", "ligand_clean.pdb"], 
+            subprocess.run([pdb4amber, "-i", str(input_ligand), "-o", "ligand_clean.pdb"],
                            cwd=work_dir, capture_output=True, check=True, env=current_env)
         except subprocess.CalledProcessError:
             print("Error: pdb4amber failed", file=sys.stderr); sys.exit(1)
 
-        # 3. Запуск HDOCK
         print("Running HDOCK...")
         cmd_hdock = [str(hdock_path), "receptor_clean.pdb", "ligand_clean.pdb", "-out", "hdock.out"]
-        
+
         proc = subprocess.run(cmd_hdock, cwd=work_dir, capture_output=True, text=True, env=current_env)
-        
+
         if proc.returncode != 0 or not local_hdock_out.exists():
             print(f"HDOCK failed. Stderr: {proc.stderr}", file=sys.stderr)
             print(f"Debug: LD_LIBRARY_PATH was: {current_env['LD_LIBRARY_PATH']}", file=sys.stderr)
             sys.exit(1)
 
-        # 4. Парсинг результата
         best_score = None
         solutions = 0
         with open(local_hdock_out, 'r') as f:
@@ -97,16 +86,14 @@ try:
         with open(output_score_file, 'w') as f:
             f.write(str(best_score))
 
-        # 5. Генерация моделей
         n_models = min(nmax_config, solutions)
         print(f"Generating {n_models} models...")
-        
+
         cmd_createpl = [str(createpl_path), "hdock.out", "complex.pdb", "-nmax", str(n_models), "-complex", "-models"]
         subprocess.run(cmd_createpl, cwd=work_dir, capture_output=True, check=True, env=current_env)
 
-        # 6. Сборка в один файл
         model_files = sorted(work_dir.glob("model_*.pdb"), key=lambda x: int(x.stem.split('_')[1]))
-        
+
         if not model_files:
             print("Error: No model files created", file=sys.stderr); sys.exit(1)
 
