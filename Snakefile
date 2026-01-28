@@ -309,59 +309,33 @@ rule block5_validate_individual:
             f.write(f"RNA atoms: {rna_count}\n")
             f.write(f"Models: {model_count if model_count > 0 else 1}\n")
 
-# Блок 6: CGMD - валидация при помощи крупнозернистой MD
+# Блок 6: MD
 
-def get_validated_complexes(wildcards):
+def get_md_targets_all(wildcards):
+    # Получаем путь к CSV из чекпоинта
     checkpoint_output = checkpoints.block5_aggregate_results.get(**wildcards).output.final_csv
 
+    targets = []
     if not os.path.exists(checkpoint_output):
-        print("[MD] CSV не найден")
         return []
-
-    validated = []
 
     with open(checkpoint_output) as f:
         reader = csv.reader(f)
         next(reader, None)
-
         for row in reader:
-            if len(row) < 2:
-                continue
-
+            if len(row) < 2: continue
             c, m = row[0].strip(), row[1].strip()
 
-            # Проверяем существование PDB
-            pdb_path = Path(f"docking_results/{c}/{m}.top100.pdb")
-            if not pdb_path.exists():
-                print(f"[MD] Пропускаем {c}/{m}: PDB не существует")
-                continue
+            # Добавляем цель
+            targets.append(f"md_runs/{c}/{m}/md.xtc")
 
-            # Проверяем размер PDB
-            if pdb_path.stat().st_size < 1024:
-                print(f"[MD] Пропускаем {c}/{m}: PDB слишком мал")
-                continue
-
-            # Проверяем наличие валидации
-            flag_path = Path(f"docking_results/{c}/{m}.validated")
-            if not flag_path.exists():
-                print(f"[MD] Пропускаем {c}/{m}: не прошёл валидацию")
-                continue
-
-            validated.append((c, m))
-
-    print(f"\n[MD] Найдено {len(validated)} валидных комплексов для симуляции\n")
-
-    return expand("md_runs/{candidate}/{model}/md.xtc",
-                  zip,
-                  candidate=[x[0] for x in validated],
-                  model=[x[1] for x in validated])
+    return targets
 
 rule block6:
-    input: get_validated_complexes
+    input: get_md_targets_all
     output: touch("block6.done")
 
 # 6.1. Подготовка структуры
-
 rule md_prep_structure:
     input:
         pdb = "docking_results/{candidate}/{model}.top100.pdb",
@@ -379,21 +353,20 @@ rule md_prep_structure:
         """
         mkdir -p {params.work_dir}
 
-        echo "Подготовка структуры {wildcards.candidate}/{wildcards.model}" > {log}
+        echo "=== Подготовка структуры {wildcards.candidate}/{wildcards.model} ===" > {log}
 
         python {input.script} {input.pdb} {output.prot_fixed} {output.rna_full} {output.ss_txt} >> {log} 2>&1
 
         # Валидация выходов
         if [ ! -s {output.prot_fixed} ] || [ ! -s {output.rna_full} ]; then
-            echo "FAIL: prepare_structure создал пустые файлы" >> {log}
+            echo "ERROR: prepare_structure создал пустые файлы" >> {log}
             exit 1
         fi
 
-        echo "Структура подготовлена успешно" >> {log}
+        echo "SUCCESS: Структура подготовлена" >> {log}
         """
 
 # 6.2. Мартинизация
-
 rule md_martinize:
     input:
         prot_fixed = "md_runs/{candidate}/{model}/protein_full_atom_fixed.pdb",
@@ -407,30 +380,30 @@ rule md_martinize:
         rna_itp = "md_runs/{candidate}/{model}/rna.itp"
     params:
         work_dir = "md_runs/{candidate}/{model}",
-        reforge_script = "../../../reForge/scripts/martinize_rna_v3.0.0.py",
+        reforge_script = "../../../resources/reForge/scripts/martinize_rna_v3.0.0.py",
         merge_script_rel = "../../../scripts/merge_itp.py"
     log:
         "logs/md_martinize/{candidate}/{model}.log"
+
     shell:
         """
         cd {params.work_dir}
 
-        echo "Мартинизация" > ../../../{log}
-
+        # 1. Martinize белка с флагом -merge all (теперь с аргументом)
         martinize2 -f protein_full_atom_fixed.pdb -x protein_cg.pdb \
-            -ff martini3001 -ss "$(cat ss.txt)" -o molecule_0.itp >> ../../../{log} 2>&1
+            -ff martini3001 -ss "$(cat ss.txt)" -o temp.itp -merge all >> ../../../{log} 2>&1
 
-        python {params.merge_script_rel} molecule_0.itp protein.itp
-        rm molecule_0.itp
+        # 2. Очистка и переименование
+        python {params.merge_script_rel} molecule_0.itp protein.itp >> ../../../{log} 2>&1
+        rm temp.itp molecule_0.itp
 
+        # 3. Мартинизация РНК
         python {params.reforge_script} -f rna_full_atom.pdb \
             -os rna_cg.pdb -ot rna.itp -elastic no >> ../../../{log} 2>&1
-
-        echo "Мартинизация завершена успешно" >> ../../../{log}
         """
 
-# 6.3. Сборка системы
 
+# 6.3. Сборка системы
 rule md_build_system:
     input:
         prot_cg = "md_runs/{candidate}/{model}/protein_cg.pdb",
@@ -444,7 +417,7 @@ rule md_build_system:
     params:
         work_dir = "md_runs/{candidate}/{model}",
         martini_itp = "../../../resources/martini_v300/martini_v3.0.0.itp",
-        martini_rna = "../../../reForge/scripts/martinize_rna_v3.0.0_itps/martini_v3.0.0_rna.itp",
+        martini_rna = "../../../resources/reForge/scripts/martinize_rna_v3.0.0_itps/martini_v3.0.0_rna.itp",
         martini_nucl = "../../../resources/martini_v300/martini_v3.0.0_nucleobases_v1.itp",
         martini_solv = "../../../resources/martini_v300/martini_v3.0.0_solvents_v1.itp",
         martini_ions = "../../../resources/martini_v300/martini_v3.0.0_ions_v1.itp",
@@ -456,14 +429,14 @@ rule md_build_system:
         """
         cd {params.work_dir}
 
-        echo "Сборка системы" > ../../../{log}
+        echo "=== Сборка системы {wildcards.candidate} ===" > ../../../{log}
 
+        # 1. Объединение структур
         cat protein_cg.pdb > complex_cg_final.pdb
         echo "TER" >> complex_cg_final.pdb
         cat rna_cg.pdb >> complex_cg_final.pdb
 
-        gmx editconf -f complex_cg_final.pdb -o complex_cg_final.gro >> ../../../{log} 2>&1
-
+        # 2. Создание топологии
         cat << EOF > topol.top
 #include "{params.martini_itp}"
 #include "{params.martini_rna}"
@@ -482,17 +455,36 @@ protein            1
 molecule           1
 EOF
 
+        # 3. Подготовка бокса и сольватация
+        gmx editconf -f complex_cg_final.pdb -o complex_cg_final.gro >> ../../../{log} 2>&1
         gmx editconf -f complex_cg_final.gro -o system_boxed.gro -c -d 1.2 -bt cubic >> ../../../{log} 2>&1
         gmx solvate -cp system_boxed.gro -cs {params.water_gro} -o system_solvated.gro -p topol.top >> ../../../{log} 2>&1
-        gmx grompp -f {params.minim_mdp} -c system_solvated.gro -p topol.top -o ions.tpr -maxwarn 50 >> ../../../{log} 2>&1
-        echo "W" | gmx genion -s ions.tpr -o system_final.gro -p topol.top -pname NA -nname CL -neutral >> ../../../{log} 2>&1
-        echo -e "1|2\nname 18 Solute\n!18\nname 19 Solvent\nq" | gmx make_ndx -f system_final.gro -o index.ndx >> ../../../{log} 2>&1
 
-        echo "Система собрана успешно" >> ../../../{log}
+        # 4. Добавление ионов
+        gmx grompp -f {params.minim_mdp} -c system_solvated.gro -p topol.top -o ions.tpr -maxwarn 50 >> ../../../{log} 2>&1
+
+        echo "W" | gmx genion -s ions.tpr -o system_final.gro -p topol.top -pname NA -nname CL -neutral >> ../../../{log} 2>&1
+
+        # 5. Создание индекс-файла
+        # Группа 1 - Protein, Группа 12 - RNA (или то, что после белка в Martini)
+        # Мы создаем группу 16 (Solute) и 17 (Solvent)
+        cat << EOC > ndx.cmd
+1 | 12
+name 16 Solute
+! 16
+name 17 Solvent
+q
+EOC
+
+        gmx make_ndx -f system_final.gro -o index.ndx < ndx.cmd >> ../../../{log} 2>&1
+
+        # Чистим временный файл команд
+        rm ndx.cmd
+
+        echo "SUCCESS: Система собрана" >> ../../../{log}
         """
 
 # 6.4. Минимизация
-
 rule md_minimization:
     input:
         gro = "md_runs/{candidate}/{model}/system_final.gro",
@@ -506,28 +498,29 @@ rule md_minimization:
         minim_mdp = "../../../mdp/minim.mdp",
         minim2_mdp = "../../../mdp/minim2.mdp"
     threads: 16
+    resources:
+        gpu = 1
     log:
         "logs/md_minim/{candidate}/{model}.log"
     shell:
         """
         cd {params.work_dir}
 
-        echo "Минимизация..." > ../../../{log}
-
+        echo "=== Минимизация Step 1 (CPU) ===" > ../../../{log}
         gmx grompp -f {params.minim_mdp} -c system_final.gro -r system_final.gro \
             -p topol.top -o em.tpr -maxwarn 50 >> ../../../{log} 2>&1
-        gmx mdrun -v -deffnm em -ntomp {threads} >> ../../../{log} 2>&1
 
+        # -nb cpu и -bonded cpu гарантируют, что GPU не будет задействован
+        # -ntmpi 1 убирает ошибку конфликта OpenMP/MPI
+        gmx mdrun -v -deffnm em -ntomp {threads} -ntmpi 1 -nb cpu -bonded cpu >> ../../../{log} 2>&1
+
+        echo "=== Минимизация Step 2 (CPU) ===" >> ../../../{log}
         gmx grompp -f {params.minim2_mdp} -c em.gro -r em.gro \
             -p topol.top -o em2.tpr -maxwarn 50 >> ../../../{log} 2>&1
-        gmx mdrun -v -deffnm em2 -ntomp {threads} >> ../../../{log} 2>&1
-
-        echo "Минимизация завершена успешно" >> ../../../{log}
+        gmx mdrun -v -deffnm em2 -ntomp {threads} -ntmpi 1 -nb cpu -bonded cpu >> ../../../{log} 2>&1
         """
 
-
 # 6.5. Уравновешивание
-
 rule md_equilibration:
     input:
         gro = "md_runs/{candidate}/{model}/em2.gro",
@@ -542,30 +535,29 @@ rule md_equilibration:
         npt_mdp = "../../../mdp/npt.mdp"
     resources:
         gpu = 1
-    threads: 8
+    threads: 16
     log:
         "logs/md_equil/{candidate}/{model}.log"
     shell:
         """
         cd {params.work_dir}
 
-        echo "Уравновешивание..." > ../../../{log}
-
+        echo "=== NVT (GPU) ===" > ../../../{log}
         gmx grompp -f {params.nvt_mdp} -c em2.gro -r em2.gro -p topol.top \
             -n index.ndx -o nvt.tpr -maxwarn 50 >> ../../../{log} 2>&1
-        gmx mdrun -v -deffnm nvt -ntomp {threads} \
-            -nb gpu -bonded gpu -pme gpu -update gpu >> ../../../{log} 2>&1
 
+        gmx mdrun -v -deffnm nvt -ntomp {threads} -ntmpi 1 \
+            -nb gpu -bonded gpu -maxh 1.0 >> ../../../{log} 2>&1
+
+        echo "=== NPT (GPU) ===" >> ../../../{log}
         gmx grompp -f {params.npt_mdp} -c nvt.gro -t nvt.cpt -p topol.top \
             -n index.ndx -o npt.tpr -maxwarn 50 >> ../../../{log} 2>&1
-        gmx mdrun -v -deffnm npt -ntomp {threads} \
-            -nb gpu -bonded gpu -pme gpu -update gpu >> ../../../{log} 2>&1
 
-        echo "Уравновешивание завершено успешно" >> ../../../{log}
+        gmx mdrun -v -deffnm npt -ntomp {threads} -ntmpi 1 \
+            -nb gpu -bonded gpu >> ../../../{log} 2>&1
         """
 
 # 6.6. Продакшн
-
 rule md_production:
     input:
         gro = "md_runs/{candidate}/{model}/npt.gro",
@@ -580,19 +572,20 @@ rule md_production:
         md_mdp = "../../../mdp/md.mdp"
     resources:
         gpu = 1
-    threads: 8
+    threads: 16
     log:
         "logs/md_prod/{candidate}/{model}.log"
     shell:
         """
         cd {params.work_dir}
 
-        echo "Продуктивная симуляция..." > ../../../{log}
-
+        echo "=== Production MD (GPU) ===" > ../../../{log}
         gmx grompp -f {params.md_mdp} -c npt.gro -t npt.cpt -p topol.top \
             -n index.ndx -o md.tpr -maxwarn 50 >> ../../../{log} 2>&1
-        gmx mdrun -deffnm md -nb gpu -bonded gpu -pme gpu -update gpu \
-            -ntmpi 1 -ntomp {threads} >> ../../../{log} 2>&1
+
+        gmx mdrun -deffnm md -ntomp {threads} -ntmpi 1 \
+            -nb gpu -bonded gpu >> ../../../{log} 2>&1
+        """
 
         echo "Продуктивная MD завершена" >> ../../../{log}
         """
