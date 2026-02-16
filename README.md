@@ -1,71 +1,59 @@
-# Пайплайн для автоматизированной валидации результатов генерации аптамеров
+# Automated Validation Pipeline for Aptamer Generation Results
 
-## Описание работы пайплайна
+## Pipeline Overview
 
-Весь рабочий процесс разделен на 6 последовательных блоков:
+The entire workflow is divided into six sequential blocks:
 
-### 1. Блок 1: ML-скрининг и консенсус
-Предполагается, что в дальнейшем на этот шаг будет подаваться результат генерации. Логика работы будет пересматриваться. Скорее всего, модели в этом шаге будут предобучены на имеющихся данных, а для результатов генерации будут лишь давать оценку.
-В данный момент вследствие логики, заложенной в этот шаг, часть данных из датасета отсекается, т.к. входит в тренировочную выборку. Дальше проходят только тестовые строки, которые прошли оценку модели.
+### Block 1: ML Screening and Consensus
+This block performs initial processing of the input dataset (`Aptamers_and_targets.csv`).  
+**Actions:**
+- Data preprocessing and train/test splitting (`preprocess_and_split.py`).
+- Running several neural network models (**Apipred**, **AptaTrans**, **AptaNet**) to predict binding probability (`apipred_benchmark.py`, `aptatrans_benchmark.py`, `aptanet_benchmark.py`).
+- Forming a consensus decision based on the models’ outputs (`run_benchmark_and_consensus.py`).
+- Selecting the best candidates for subsequent structural modeling (`run_benchmark_and_consensus.py`).  
+**Result:** `candidates_for_docking.csv` and a prepared folder structure for each candidate.
 
-На этом этапе происходит первичная обработка входного датасета (`Aptamers_and_targets.csv`).
-*   **Действия:**
-    *   Предобработка данных и разбиение на выборки. (скрипт `preprocess_and_split.py`)
-    *   Запуск нескольких нейросетевых моделей (**Apipred**, **AptaTrans**, **AptaNet**) для предсказания вероятности связывания. (скрипты  `apipred_benchmark.py`, `aptatrans_benchmark.py`, `aptanet_benchmark.py` соответственно)
-    *   Формирование консенсусного решения на основе результатов моделей. (скрипт `run_benchmark_and_consensus.py`)
-    *   Отбор лучших кандидатов для дальнейшего структурного моделирования. (скрипт `run_benchmark_and_consensus.py`)
-*   **Результат:** Файл `candidates_for_docking.csv` и подготовленная структура папок для кандидатов.
+### Block 2: Protein Sequence Processing
+For each protein target, its 3D structure is obtained either by folding from the FASTA sequence using ESMFold (primary option) or, if ESMFold fails (e.g., due to size or ligand issues), by searching the AlphaFold database.  
+**Actions:** Protein folding and sequence validation (`retract_and_fold.py`).  
+**Result:** Protein 3D structures (`protein_3D.pdb`) for each target.
 
-PS: Для простоты отладки пока это просто закатанные в отдельные .py скрипты ячейки ноутбука, которые я исопльзовал для отработки ручных запусков, с модификацией для автоматизации. В этом смысле Snakemake здесь просто работает как продвинутая запускалка скриптов, в дальнейшем часть логики будет вынесена непосредственно в Snakemake
+### Block 3: Secondary Structure Prediction
+Prediction of the aptamer’s secondary structure (dot‑bracket notation) to accelerate subsequent 3D folding.  
+**Tool:** RNAfold (or equivalent algorithms in `2D_aptamer_prediction.py`).  
+**Result:** `aptamer.ss` files for each candidate.
 
-### 2. Блок 2: Обработка последовательностей белков
-На этом шаге из FASTA сиквенсов белков либо фолдится PDB, либо, если апишка ESMfold отказалась это делать (слишком большой белок, не понравились какие то лиганды и тд и тп) - поиск по базе альфафолда. Пока альтернатив ESMfold с доступным API не найдено
-*   **Действия:** Фолдинг и проверка последовательностей белков (скрипт `retract_and_fold.py`).
+### Block 4: 3D Aptamer Modeling
+Generation of the aptamer’s tertiary structure based on its secondary structure.  
+- **Step 4.1 (NSP Assembly):** Production of a pool of coarse 3D models using **NSP** (NSP/cirRNA_and_DNA/nsp).  
+- **Step 4.2 (Refinement):** Geometric refinement of each model.  
+- **Step 4.3 (Selection):** Selection of the best model based on energy or structural criteria and cleanup of temporary files.  
+**Result:** `aptamer_3D.pdb` ready for docking.
 
-### 3. Блок 3: Предсказание 2D структуры
-Предсказание вторичной структуры РНК-аптамера. В основном, все программы для фолдинга 3D структуры аптамеров принимают на вход именно ее, а не просто сиквенс. Это сильно ускоряет фолдинг.
-*   **Инструмент:** RNAfold (или аналогичные алгоритмы в скрипте `2D_aptamer_prediction.py`).
-*   **Результат:** Файлы `aptamer.ss` (dot-bracket нотация) для каждого кандидата.
+### Block 5: Molecular Docking
+Modeling of the protein–aptamer interaction.  
+- **Docking:** **HDOCK** is used to predict the complex between `protein_3D.pdb` and `aptamer_3D.pdb`.  
+- **Aggregation:** Collection of scoring results for all candidates into a single CSV file.  
+- **Validation:** Automatic check of the generated PDB complex files before passing them to MD:
+  - Presence of atoms.
+  - Minimum atom count thresholds (protein > 50, RNA > 20).
+  - Generation of a `.validated` flag only for correct structures.  
+**Result:** `final_ranked_candidates_hdock.csv` (ranks and scores) and validated PDB complexes.
 
-PS: Все остальные шаги написаны непосредственно внутри Snakefile, т.е. все прелести с асинхронностью, созданием графа задач, несоответствующего фактически имеющимся с прошлых шагов инпутам - в студию.
+### Block 6: Coarse‑Grained Molecular Dynamics
+Final stability assessment of the complexes using the **Martini 3** force field and **GROMACS**. Only complexes that passed validation in Block 5 proceed.  
+- **Step 6.1 (Prep):** Preparation of all‑atom structures, chain splitting, and PDB header fixing.  
+- **Step 6.2 (Martinize):** Conversion to coarse‑grained representation:
+  - Protein: `martinize2`.
+  - RNA: `reForge` (script `martinize_rna_v3.0.0.py`).
+  - Merging of topology files (`.itp`).  
+- **Step 6.3 (Build System):** System assembly, cubic box definition, solvation (Martini water), and ion addition for charge neutralization.  
+- **Step 6.4 (Minimization):** Two‑step energy minimization (Steepest Descent).  
+- **Step 6.5 (Equilibration):** System equilibration in NVT and NPT ensembles.  
+- **Step 6.6 (Production):** Production MD run on GPU.  
+**Result:** Trajectory (`md.xtc`) and final structure (`md.gro`) for stability analysis.
 
-### 4. Блок 4: 3D моделирование аптамера
-Генерация третичной структуры аптамера на основе его вторичной структуры.
-*   **Шаг 4.1 (NSP Assembly):** Генерация пула черновых 3D-моделей с использованием инструмента **NSP** (NSP/cirRNA_and_DNA/nsp).
-*   **Шаг 4.2 (Refinement):** Геометрическое уточнение каждой модели.
-*   **Шаг 4.3 (Selection):** Выбор наилучшей модели (по энергетическим или структурным критериям) и очистка временных файлов.
-*   **Результат:** Файл `aptamer_3D.pdb`, готовый к докингу на каждом шаге итерации по `docking_candidates/candidates_for_docking.csv`. (PS: текущий файл, с которым работаю, доступен по этому же пути в репозитории)
+---
 
-### 5. Блок 5: Молекулярный докинг
-Моделирование взаимодействия "белок-аптамер".
-*   **Докинг:** Используется **HDOCK** для предсказания комплекса между `protein_3D.pdb` и `aptamer_3D.pdb`. Программа выбрана по критериям "что удалось запустить" и "что делает докинг за приемлемое время". Все типичные решения, типа AutoDock Vina, lightdock, Diff Dock и еще несколько других, оказались неподходящими для докинга таких крупных молекул. Из-за того, что классические программы для докинга не только подбирают положение, но и вращают связи лиганда вокруг атомов, один докинг такого аптамера занимает гораздо дольше, чем даже полноатомная молдинамика (не потому что последняя происходит быстро, а потому что докинг происходит невероятно медленно). HDOCK следует упрощенной логике, поэтому всех кандидатов из списка можно проверить за несколько часов. Однако программа отнюдь не является State-of-the-art.
-*   **Агрегация:** Сбор результатов скоринга всех кандидатов в единый CSV-файл.
-*   **Валидация:** Автоматическая проверка полученных PDB-файлов комплексов перед передачей в MD:
-    *   Проверка наличия атомов.
-    *   Минимальный порог атомов (белок > 50, РНК > 20).
-    *   Генерация флага `.validated` только для корректных структур.
- 
-PS: и множество шагов для починки требуется из за особенностей работы программы для фолдинга и для докинга. NSP в результате фолдинга возвращает структуру, у которой имеются множественные разрывы сахаро-фосфатного остова аптамера, т.к. программа не осуществляет молдинамическую оптимизацию геометрии, а собирает готовую форму из кусочков. Не всегда она успешно собирает эти кусочки. Более того, часто кусочки аптамера улетают на гигантские дистанции. В дальнейшем это будет главным лимитирующим шагом, так как не очень совершенные программы могут генерировать всякие чудеса. Аналогично и с починкой комплекса. После докинга получившаяся PDB тоже может иметь дефекты в виде непостроенных связей при корректном расположении атомов. Скрипты в самом простом случае просто нарисуют эти палочки между близлежащими атомами. В худшем случае, комплекс будет скипнут, если не подлежит починке. При разработке старался максимально избежать изменений структуры, т.е. ситуация где докинг-скор вернут для одной структуры, а в результате починки на молдинамику подается совсем другая - должен быть исключен. Но пока не все возможные ошибки были отловлены, проблемы все еще могут возникать. Предполагается в дальнейшем интегрировать в пайплайн более совершенные инструменты, типа альфафолда.
-
-На выходе получается файл `final_ranked_candidates_hdock.csv`, текущий файл, на основе которого производится отладка следующего шага, в папке `docking_results`
-
-### 6. Блок 6: Крупнозернистая молекулярная динамика
-
-Финальная проверка стабильности комплексов с использованием силового поля **Martini 3** и **GROMACS**. В этот блок попадают только комплексы, прошедшие валидацию в Блоке 5.
-
-*   **Шаг 6.1 (Prep):** Подготовка полноатомных структур, разделение цепей, фиксация заголовков PDB.
-*   **Шаг 6.2 (Martinize):** Конвертация структур в крупнозернистое представление:
-    *   Белок: `martinize2`.
-    *   РНК: `reForge` (скрипт `martinize_rna_v3.0.0.py`).
-    *   Объединение топологий (`.itp`).
-*   **Шаг 6.3 (Build System):** Сборка системы, определение кубической ячейки, сольватация (Martini water), добавление ионов для нейтрализации заряда.
-*   **Шаг 6.4 (Minimization):** Двухступенчатая минимизация энергии (Steepest Descent).
-*   **Шаг 6.5 (Equilibration):** Уравновешивание системы в ансамблях NVT и NPT.
-*   **Шаг 6.6 (Production):** Запуск продуктивной симуляции на GPU.
-*   **Результат:** Траектория `md.xtc` и финальная структура `md.gro` для анализа стабильности комплекса.
-
-PS: сейчас на этапе отладки, однако скрипт уже работает как нужно, создает траектории, итерируется по результатам докинга, скипает взорвавшиеся системы, последовательно выделяет ресурсы на симуляции
-
-## Системные требования на каждом шаге
-
-*будет написано, какие пакеты требуются, в ближайшее время будет интегрировано автоматическое разворачивание и чистка окружений на каждый шаг*
+## System Requirements
+*(To be added: required software packages and automatic environment setup per step will be integrated soon.)*
